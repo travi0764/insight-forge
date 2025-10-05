@@ -98,6 +98,7 @@ class PDFUploadResponse(BaseModel):
     total_pages: int
     stats: Dict[str, int]
     extracted_charts: List[ExtractedImageResponse]
+    extracted_images: List[ExtractedImageResponse]
     message: str
     
     class Config:

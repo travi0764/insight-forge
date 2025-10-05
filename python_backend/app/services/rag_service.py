@@ -217,6 +217,9 @@ Answer:"""
                             img.to_dict() for img in session_data["extraction_result"].images
                             if img.is_chart
                         ],
+                        "extracted_images": [
+                            img.to_dict() for img in session_data["extraction_result"].images
+                        ],
                         "reused": True
                     }
             
@@ -256,6 +259,7 @@ Answer:"""
             
             # Add table documents
             for table in extraction_result.tables:
+                rows, columns = table.data.shape
                 # Add as markdown
                 markdown_content = f"Table {table.table_id}:\n{table.to_markdown()}"
                 doc = Document(
@@ -264,7 +268,8 @@ Answer:"""
                         "source": "table",
                         "page_number": table.page_number,
                         "table_id": table.table_id,
-                        "table_shape": table.data.shape
+                        "table_rows": int(rows),
+                        "table_columns": int(columns)
                     }
                 )
                 documents.append(doc)
@@ -326,6 +331,9 @@ Answer:"""
                     img.to_dict() for img in extraction_result.images
                     if img.is_chart
                 ],
+                "extracted_images": [
+                    img.to_dict() for img in extraction_result.images
+                ],
                 "reused": False
             }
             
@@ -375,38 +383,49 @@ Answer:"""
             # Classify intent
             intent_chain = self.intent_prompt | self.llm | JsonOutputParser()
             intent_result = await intent_chain.ainvoke({"query": query})
-            
+
             intent = intent_result.get("intent", "qna")
             logger.info(f"Query intent classified as: {intent}")
-            
+
             # Handle based on intent
             if intent == "viz":
                 # Visualization query
-                extracted_data = intent_result.get("extracted_data", {})
+                extracted = intent_result.get("extracted_data", {})
                 
-                # Generate answer about the visualization
-                viz_chain = self.viz_answer_prompt | self.llm
-                answer_response = await viz_chain.ainvoke({
-                    "context": context,
-                    "query": query
-                })
+                # Convert data points to text format for analysis
+                data_points = extracted.get("data_points", [])
+                if data_points:
+                    # Format as text: "label1: value1, label2: value2"
+                    text_data = ", ".join([
+                        f"{point.get('label', 'item')}: {point.get('value', 0)}" 
+                        for point in data_points
+                    ])
+                else:
+                    text_data = "No data points extracted"
                 
-                # Import analyzer for chart generation
-                from app.ai.analyzer import analyze_text_data, convert_to_chart_data
+                # Import chart service for chart generation
+                from app.services.chart_service import get_chart_service
                 
-                # Convert extracted data to chart config
-                data_points_json = json.dumps(extracted_data.get("data_points", []))
-                analyzed = await analyze_text_data(data_points_json)
-                chart_config = convert_to_chart_data(analyzed)
+                chart_service = get_chart_service()
+                analyzed = await chart_service.analyze_text_data(text_data)
+                chart_cfg = chart_service.convert_to_chart_config(analyzed)
                 
-                return {
-                    "answer": answer_response.content,
+                answer_prompt = ChatPromptTemplate.from_template(
+                    "Based on context: {context}\nAnswer the query: {query}\nA chart has been generated showing the data visualization."
+                )
+                answer_chain = answer_prompt | self.llm
+                answer = await answer_chain.ainvoke({"context": context, "query": query})
+
+                response = {
+                    "answer": answer.content,
                     "intent": "viz",
-                    "chart_config": chart_config,
+                    "chart_config": chart_cfg,
                     "confidence": analyzed.confidence,
                     "sources": [result["metadata"] for result in search_results]
                 }
-            
+
+                return response
+
             else:
                 # Q&A query
                 qa_chain = self.qa_prompt | self.llm

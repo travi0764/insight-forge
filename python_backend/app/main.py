@@ -19,6 +19,7 @@ from app.config.settings import get_settings
 from app.core.logging import setup_logging, get_logger
 from app.core.exceptions import ChartAIException
 from app.routes.rag_routes import router as rag_router
+from app.routes.chart_routes import router as chart_router
 from app.services.rag_service import initialize_rag_service
 
 # Initialize settings and logging
@@ -154,10 +155,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Include routers
 app.include_router(rag_router)
-
-
+app.include_router(chart_router)
 # Root endpoint
-@app.get("/", tags=["Root"])
+@app.get("/api", tags=["Root"])
 async def root():
     """Root endpoint."""
     return {
@@ -169,12 +169,18 @@ async def root():
 
 
 # Serve static files (frontend) if available
-client_path = Path(__file__).parent.parent / "client"
+# Path structure: python_backend/app/main.py -> go up 2 levels to reach client/
+client_path = Path(__file__).parent.parent.parent / "client"
+
 if client_path.exists() and client_path.is_dir():
+    # Mount static files at root AFTER API routes
+    # This ensures API routes take precedence
     app.mount("/", StaticFiles(directory=str(client_path), html=True), name="static")
     logger.info(f"Serving static files from: {client_path}")
+    logger.info(f"Frontend available at: http://{settings.host}:{settings.port}/")
 else:
     logger.warning(f"Client directory not found: {client_path}")
+    logger.info(f"Expected client directory at: {client_path.absolute()}")
 
 
 def main():

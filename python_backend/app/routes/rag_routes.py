@@ -92,7 +92,8 @@ async def upload_pdf(file: UploadFile = File(...)):
             total_pages=result["total_pages"],
             stats=result["stats"],
             extracted_charts=result["extracted_charts"],
-            message="PDF uploaded and processed successfully" + 
+            extracted_images=result["extracted_images"],
+            message="PDF uploaded and processed successfully" +
                     (" (reused existing session)" if result.get("reused") else "")
         )
         
@@ -350,11 +351,4 @@ async def health_check():
         )
 
 
-# Exception handler for custom exceptions
-@router.exception_handler(ChartAIException)
-async def chartai_exception_handler(request, exc: ChartAIException):
-    """Handle custom ChartAI exceptions."""
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content=exc.to_dict()
-    )
+# Note: Exception handlers are defined in main.py at the app level

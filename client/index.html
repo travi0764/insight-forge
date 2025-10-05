@@ -26,6 +26,10 @@
           <a href="#features" class="nav-link" data-testid="link-features">Features</a>
           <a href="#pricing" class="nav-link" data-testid="link-pricing">Pricing</a>
           <a href="#support" class="nav-link" data-testid="link-support">Support</a>
+          <button id="historyBtn" class="btn btn-ghost" style="margin-left: 10px;">
+            <i data-lucide="history"></i>
+            History
+          </button>
         </nav>
       </div>
     </header>
@@ -139,8 +143,8 @@
                       <span class="format-tag">PDF</span>
                     </div>
                   </div>
-                  <input type="file" id="pdfInput" accept=".pdf" hidden>
                 </div>
+                <input type="file" id="pdfInput" accept=".pdf" hidden>
                 <div id="uploadedPdf" class="uploaded-file" style="display: none;">
                   <div class="file-info">
                     <i data-lucide="file"></i>
@@ -224,6 +228,39 @@
       </section>
     </main>
 
+    <!-- History Page (Initially Hidden) -->
+    <div class="history-page" id="historyPage" style="display: none;">
+      <header class="results-header">
+        <div class="container">
+          <button id="backToHomeFromHistoryBtn" class="btn btn-ghost">
+            <i data-lucide="arrow-left"></i>
+            Back to Home
+          </button>
+          <h1>Upload History</h1>
+          <p style="color: var(--text-secondary); margin-top: 10px;">View and manage your previously uploaded PDFs</p>
+        </div>
+      </header>
+
+      <main class="results-content">
+        <div class="container">
+          <div id="historyLoadingState" class="loading-state" style="display: none;">
+            <div class="loading-spinner"></div>
+            <h3>Loading history...</h3>
+          </div>
+
+          <div id="historyContainer" style="margin-top: 30px;">
+            <!-- History items will be dynamically inserted here -->
+          </div>
+
+          <div id="emptyHistoryState" style="display: none; text-align: center; padding: 60px 20px;">
+            <i data-lucide="inbox" style="width: 64px; height: 64px; color: var(--text-tertiary); margin-bottom: 20px;"></i>
+            <h3 style="color: var(--text-secondary); margin-bottom: 10px;">No upload history</h3>
+            <p style="color: var(--text-tertiary);">Your previously uploaded PDFs will appear here</p>
+          </div>
+        </div>
+      </main>
+    </div>
+
     <!-- Results Page (Initially Hidden) -->
     <div class="results-page" id="resultsPage" style="display: none;">
       <button id="reuseSessionBtn">Reuse Session ID</button>
@@ -257,6 +294,14 @@
           <div id="extractedChartsContainer" style="display: none;">
             <h3>Extracted Charts from PDF</h3>
             <div class="extracted-charts-grid">
+              <!-- Dynamically insert <img src="base64" /> with descriptions -->
+            </div>
+          </div>
+
+          <!-- New: Extracted Images from PDF -->
+          <div id="extractedImagesContainer" style="display: none;">
+            <h3>Extracted Images from PDF</h3>
+            <div class="extracted-images-grid">
               <!-- Dynamically insert <img src="base64" /> with descriptions -->
             </div>
           </div>

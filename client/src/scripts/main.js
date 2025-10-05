@@ -10,6 +10,7 @@ let pdfSessionId = null; // New: Store session_id from PDF upload
 // DOM Elements
 const homePage = document.getElementById("homePage");
 const resultsPage = document.getElementById("resultsPage");
+const historyPage = document.getElementById("historyPage");
 const loadingOverlay = document.getElementById("loadingOverlay");
 const loadingText = document.getElementById("loadingText");
 
@@ -33,6 +34,9 @@ const analyzePdfBtn = document.getElementById("analyzePdfBtn");
 const removePdfBtn = document.getElementById("removePdfBtn");
 const extractedChartsContainer = document.getElementById(
   "extractedChartsContainer"
+);
+const extractedImagesContainer = document.getElementById(
+  "extractedImagesContainer"
 );
 const pdfQuerySection = document.getElementById("pdfQuerySection");
 const pdfQueryInput = document.getElementById("pdfQueryInput");
@@ -164,15 +168,24 @@ function hideLoading() {
 function showHomePage() {
   homePage.style.display = "block";
   resultsPage.style.display = "none";
+  historyPage.style.display = "none";
 }
 
 function showResultsPage(showPdfSection = false) {
   homePage.style.display = "none";
   resultsPage.style.display = "block";
+  historyPage.style.display = "none";
   loadingState.style.display = "block";
   chartsContainer.style.display = "none";
   extractedChartsContainer.style.display = "none";
   pdfQuerySection.style.display = showPdfSection ? "block" : "none"; // New: Toggle PDF query section
+}
+
+function showHistoryPage() {
+  homePage.style.display = "none";
+  resultsPage.style.display = "none";
+  historyPage.style.display = "block";
+  loadHistory();
 }
 
 function formatDataForChart(chartData, chartType) {
@@ -663,20 +676,36 @@ function showNotification(message, type = "info") {
   }, 3000);
 }
 
-// API Functions
-async function analyzeTextData(text, chartType = "auto") {
-  const response = await fetch(`${API_BASE_URL}/api/analyze-data`, {
+
+async function analyzeTextData(text, chart_type = "auto") {
+  const request = {
+    url: `${API_BASE_URL}/api/chart/analyze-data`,
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, chartType }),
+    body: JSON.stringify({ text, chart_type }),
+  };
+
+  // Log the request details
+  console.log("Sending request to backend:", {
+    url: request.url,
+    method: request.method,
+    headers: request.headers,
+    body: JSON.parse(request.body), // Parse body to log as object for readability
   });
+
+  const response = await fetch(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: request.body,
+  });
+
   if (!response.ok)
     throw new Error(`HTTP ${response.status}: ${await response.text()}`);
   return await response.json();
 }
 
 async function analyzeTextDataMulti(text, maxCharts = 5) {
-  const response = await fetch(`${API_BASE_URL}/api/analyze-data-multi`, {
+  const response = await fetch(`${API_BASE_URL}/api/chart/analyze-data-multi`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, maxCharts }),
@@ -687,7 +716,7 @@ async function analyzeTextDataMulti(text, maxCharts = 5) {
 }
 
 async function parseCSVData(csvContent) {
-  const response = await fetch(`${API_BASE_URL}/api/parse-csv`, {
+  const response = await fetch(`${API_BASE_URL}/api/chart/parse-csv`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ csvContent }),
@@ -702,7 +731,7 @@ async function uploadPdf(pdfFile) {
   const formData = new FormData();
   formData.append("file", pdfFile);
 
-  const response = await fetch(`${API_BASE_URL}/api/upload-pdf`, {
+  const response = await fetch(`${API_BASE_URL}/api/rag/upload-pdf`, {
     method: "POST",
     body: formData,
   });
@@ -713,10 +742,40 @@ async function uploadPdf(pdfFile) {
 
 // New: Query PDF API
 async function queryPdf(query, sessionId) {
-  const response = await fetch(`${API_BASE_URL}/api/query`, {
+  const response = await fetch(`${API_BASE_URL}/api/rag/query`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, session_id: sessionId }),
+  });
+  if (!response.ok)
+    throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+  return await response.json();
+}
+
+// New: Get all sessions API
+async function getAllSessions() {
+  const response = await fetch(`${API_BASE_URL}/api/rag/sessions`, {
+    method: "GET",
+  });
+  if (!response.ok)
+    throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+  return await response.json();
+}
+
+// New: Get session stats API
+async function getSessionStats(sessionId) {
+  const response = await fetch(`${API_BASE_URL}/api/rag/session/${sessionId}/stats`, {
+    method: "GET",
+  });
+  if (!response.ok)
+    throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+  return await response.json();
+}
+
+// New: Delete session API
+async function deleteSession(sessionId) {
+  const response = await fetch(`${API_BASE_URL}/api/rag/session/${sessionId}`, {
+    method: "DELETE",
   });
   if (!response.ok)
     throw new Error(`HTTP ${response.status}: ${await response.text()}`);
@@ -894,6 +953,7 @@ function handlePdfUpload(event) {
 
 function handlePdfDrop(event) {
   event.preventDefault();
+  event.stopPropagation();
   pdfUploadArea.classList.remove("drag-active");
 
   const file = event.dataTransfer.files[0];
@@ -902,9 +962,14 @@ function handlePdfDrop(event) {
     return;
   }
 
-  pdfInput.files = new DataTransfer().items.add(file).files;
+  // Create DataTransfer object properly
+  const dataTransfer = new DataTransfer();
+  dataTransfer.items.add(file);
+  pdfInput.files = dataTransfer.files;
+  
   handlePdfUpload({ target: { files: [file] } });
 }
+
 
 function removePdf() {
   uploadedPdf = null;
@@ -919,23 +984,41 @@ async function analyzePdf() {
   if (!uploadedPdf || isProcessing) return;
   isProcessing = true;
   analyzePdfBtn.disabled = true;
+  
   try {
     showLoading("Processing your PDF...");
     const result = await uploadPdf(uploadedPdf);
     hideLoading();
+    
     if (result.success) {
       pdfSessionId = result.session_id;
-      showResultsPage(true);
-      displayExtractedCharts(result.extracted_charts);
+      showResultsPage(true); // Show PDF query section
+
+      // Display extracted charts and images
+      displayExtractedCharts(result.extracted_charts || []);
+      displayExtractedImages(result.extracted_images || []);
+
       // Display session ID for reuse
       const sessionInfo = document.createElement("p");
-      sessionInfo.textContent = `Session ID: ${pdfSessionId} (Save this to reuse without reprocessing)`;
+      sessionInfo.style.cssText = "margin-top: 20px; padding: 10px; background: var(--bg-tertiary); border-radius: 8px; color: var(--text-secondary);";
+      sessionInfo.innerHTML = `<strong>Session ID:</strong> ${pdfSessionId}<br><small>Save this to reuse without reprocessing</small>`;
       extractedChartsContainer.appendChild(sessionInfo);
+      
+      // Show stats
+      if (result.stats) {
+        const statsInfo = document.createElement("p");
+        statsInfo.style.cssText = "margin-top: 10px; color: var(--text-secondary); font-size: 0.875rem;";
+        statsInfo.innerHTML = `
+          <strong>Extraction Stats:</strong><br>
+          • ${result.stats.text_blocks} text blocks<br>
+          • ${result.stats.tables_extracted} tables<br>
+          • ${result.stats.images_extracted} images<br>
+          • ${result.stats.charts_detected} charts detected
+        `;
+        extractedChartsContainer.appendChild(statsInfo);
+      }
     } else {
-      alert(
-        "Error processing PDF: " +
-          (result.error || result.detail || "Unknown error")
-      );
+      alert("Error processing PDF: " + (result.error || result.detail || "Unknown error"));
     }
   } catch (error) {
     hideLoading();
@@ -953,7 +1036,7 @@ function queryWithSessionId() {
     pdfSessionId = sessionIdInput;
     showResultsPage(true);
     // Optionally fetch charts for the session
-    fetch(`/api/query`, {
+    fetch(`/api/rag/query`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -982,41 +1065,108 @@ document
 
 // New: Display Extracted Charts
 function displayExtractedCharts(charts) {
+  console.log("Displaying charts:", charts); // DEBUG
   extractedChartsContainer.innerHTML = ""; // Clear previous content
-  if (charts && charts.length > 0) {
-    extractedChartsContainer.style.display = "block";
-    // Ensure .extracted-charts-grid exists
-    let grid = extractedChartsContainer.querySelector(".extracted-charts-grid");
-    if (!grid) {
-      grid = document.createElement("div");
-      grid.className = "extracted-charts-grid";
-      extractedChartsContainer.appendChild(grid);
-    }
-    // Add title if not present
-    if (!extractedChartsContainer.querySelector("h3")) {
-      const title = document.createElement("h3");
-      title.textContent = "Extracted Charts from PDF";
-      extractedChartsContainer.insertBefore(title, grid);
-    }
-    charts.forEach((chart, index) => {
-      const imgElement = document.createElement("div");
-      imgElement.className = "extracted-chart";
-      imgElement.innerHTML = `
-        <img src="${chart.base64}" alt="Extracted Chart ${
-        index + 1
-      }" style="max-width: 100%; margin-bottom: 10px;">
-        <p>${chart.description}</p>
-      `;
-      grid.appendChild(imgElement);
-    });
-  } else {
+  
+  if (!charts || charts.length === 0) {
     extractedChartsContainer.style.display = "none";
+    console.log("No charts to display");
+    return;
   }
+  
+  extractedChartsContainer.style.display = "block";
+  
+  // Create title
+  const title = document.createElement("h3");
+  title.textContent = `Extracted Charts from PDF (${charts.length})`;
+  title.style.cssText = "margin-bottom: 20px; color: var(--text-primary);";
+  extractedChartsContainer.appendChild(title);
+  
+  // Create grid container
+  const grid = document.createElement("div");
+  grid.className = "extracted-charts-grid";
+  extractedChartsContainer.appendChild(grid);
+  
+  charts.forEach((chart, index) => {
+    console.log(`Chart ${index}:`, chart); // DEBUG
+    const imgElement = document.createElement("div");
+    imgElement.className = "extracted-chart";
+    
+    // Fix: Use base64_data instead of base64
+    const imageData = chart.base64_data || chart.base64 || "";
+    const description = chart.description || "Extracted chart";
+    const chartType = chart.chart_type || "unknown";
+    const isChart = chart.is_chart ? "✓ Chart detected" : "Image";
+    
+    imgElement.innerHTML = `
+      <div style="position: relative;">
+        <img src="${imageData}" alt="Extracted Chart ${index + 1}" style="max-width: 100%; border-radius: 8px; margin-bottom: 10px;">
+        <span style="position: absolute; top: 5px; right: 5px; background: var(--primary); color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem;">
+          ${isChart}
+        </span>
+      </div>
+      <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 5px;">${description}</p>
+      ${chart.chart_type ? `<p style="color: var(--text-tertiary); font-size: 0.75rem;">Type: ${chartType}</p>` : ''}
+    `;
+    grid.appendChild(imgElement);
+  });
+  
+  console.log(`Displayed ${charts.length} charts`);
+}
+
+// New: Display Extracted Images
+function displayExtractedImages(images) {
+  console.log("Displaying images:", images); // DEBUG
+  extractedImagesContainer.innerHTML = ""; // Clear previous content
+
+  if (!images || images.length === 0) {
+    extractedImagesContainer.style.display = "none";
+    console.log("No images to display");
+    return;
+  }
+
+  extractedImagesContainer.style.display = "block";
+
+  // Create title
+  const title = document.createElement("h3");
+  title.textContent = `Extracted Images from PDF (${images.length})`;
+  title.style.cssText = "margin-bottom: 20px; color: var(--text-primary);";
+  extractedImagesContainer.appendChild(title);
+
+  // Create grid container
+  const grid = document.createElement("div");
+  grid.className = "extracted-images-grid";
+  grid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;";
+  extractedImagesContainer.appendChild(grid);
+
+  images.forEach((image, index) => {
+    console.log(`Image ${index}:`, image); // DEBUG
+    const imgElement = document.createElement("div");
+    imgElement.className = "extracted-image";
+    imgElement.style.cssText = "background: var(--bg-secondary); border-radius: 8px; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);";
+
+    const imageData = image.base64_data || image.base64 || "";
+    const description = image.description || "Extracted image";
+    const isChart = image.is_chart;
+    const chartBadge = isChart ? `<span style="position: absolute; top: 10px; right: 10px; background: var(--primary); color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem;">Chart</span>` : "";
+
+    imgElement.innerHTML = `
+      <div style="position: relative;">
+        <img src="${imageData}" alt="Extracted Image ${index + 1}" style="max-width: 100%; border-radius: 8px; margin-bottom: 10px;">
+        ${chartBadge}
+      </div>
+      <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 5px;">${description}</p>
+      <p style="color: var(--text-tertiary); font-size: 0.75rem;">Page ${image.page_number || 'N/A'} | ${image.format?.toUpperCase() || 'Unknown'} | ${image.width}x${image.height}</p>
+    `;
+    grid.appendChild(imgElement);
+  });
+
+  console.log(`Displayed ${images.length} images`);
 }
 
 // ... (rest of the file unchanged)
 
-// New: Submit PDF Query
+// Fix the submitPdfQuery function (around line 805):
 async function submitPdfQuery() {
   const query = pdfQueryInput.value.trim();
   if (!query || !pdfSessionId || isProcessing) return;
@@ -1031,39 +1181,84 @@ async function submitPdfQuery() {
 
     hideLoading();
 
-    if (result.success) {
-      const data = result.data;
-      pdfQueryResponse.innerHTML = `<p><strong>Answer:</strong> ${data.answer}</p>`;
+    console.log("Query result:", result); // DEBUG
 
-      if (data.intent === "viz" && data.chart_config) {
-        // Render generated chart
+    if (result && result.success) {
+      // FIX: The response is at root level, not nested under 'data'
+      const answer = result.answer || "No answer provided";
+      const intent = result.intent || "qa";
+      const chartConfig = result.chart_config;
+      const confidence = result.confidence || 0.9;
+      const existingCharts = result.existing_charts || [];
+      
+      // Display answer
+      pdfQueryResponse.innerHTML = `
+        <div style="padding: 15px; background: var(--bg-tertiary); border-radius: 8px; margin-bottom: 15px;">
+          <h4 style="margin-bottom: 10px; color: var(--text-primary);">Answer:</h4>
+          <p style="color: var(--text-primary); line-height: 1.6;">${answer}</p>
+        </div>
+      `;
+
+      // If visualization intent, render chart
+      if (intent === "viz" && chartConfig) {
         chartsContainer.style.display = "block";
         chartsContainer.innerHTML = "";
         const chartCard = createChartElement(
-          { title: "Generated Chart from Query", description: data.answer },
-          data.confidence || 0.9
+          { title: "Generated Chart from Query", description: answer },
+          confidence || 0.9
         );
         chartsContainer.appendChild(chartCard);
         const canvas = chartCard.querySelector(".chart-canvas");
         renderChart(
           canvas,
-          data.chart_config.data,
-          data.chart_config.type,
+          chartConfig.data,
+          chartConfig.type,
           "Generated Chart"
         );
       }
 
-      if (data.existing_charts && data.existing_charts.length > 0) {
-        pdfQueryResponse.innerHTML += "<h4>Relevant Existing Charts:</h4>";
-        data.existing_charts.forEach((chart) => {
-          pdfQueryResponse.innerHTML += `<img src="${chart.base64}" alt="Existing Chart" style="max-width: 300px; margin: 10px;"><p>${chart.description}</p>`;
+      // Display existing charts if any
+      if (existingCharts && existingCharts.length > 0) {
+        pdfQueryResponse.innerHTML += `
+          <h4 style="margin-top: 20px; margin-bottom: 10px; color: var(--text-primary);">Relevant Charts:</h4>
+        `;
+        const chartsGrid = document.createElement("div");
+        chartsGrid.className = "extracted-charts-grid";
+        existingCharts.forEach((chart, index) => {
+          const chartDiv = document.createElement("div");
+          chartDiv.className = "extracted-chart";
+          chartDiv.innerHTML = `
+            <img src="${chart.base64_data || chart.base64}" alt="Chart ${index + 1}" style="max-width: 100%; margin-bottom: 10px;">
+            <p style="color: var(--text-secondary);">${chart.description || 'Chart'}</p>
+          `;
+          chartsGrid.appendChild(chartDiv);
         });
+        pdfQueryResponse.appendChild(chartsGrid);
+      }
+      
+      // Show sources
+      if (result.sources && result.sources.length > 0) {
+        pdfQueryResponse.innerHTML += `
+          <details style="margin-top: 15px;">
+            <summary style="cursor: pointer; color: var(--text-secondary); font-size: 0.875rem;">
+              View Sources (${result.sources.length})
+            </summary>
+            <ul style="margin-top: 10px; padding-left: 20px; color: var(--text-tertiary); font-size: 0.75rem;">
+              ${result.sources.map(src => `
+                <li>Page ${src.page_number} - ${src.source} (${src.char_count} chars)</li>
+              `).join('')}
+            </ul>
+          </details>
+        `;
       }
     } else {
-      alert("Error querying PDF: " + (result.error || "Unknown error"));
+      const errorMsg = result?.error || result?.detail || "Unknown error - Invalid response format";
+      console.error("Query failed:", result);
+      alert("Error querying PDF: " + errorMsg);
     }
   } catch (error) {
     hideLoading();
+    console.error("Query error:", error);
     alert("Error querying PDF: " + error.message);
   } finally {
     isProcessing = false;
@@ -1156,6 +1351,144 @@ function backToHome() {
   chartsContainer.innerHTML = "";
 }
 
+// New: Load history
+async function loadHistory() {
+  const historyLoadingState = document.getElementById("historyLoadingState");
+  const historyContainer = document.getElementById("historyContainer");
+  const emptyHistoryState = document.getElementById("emptyHistoryState");
+
+  try {
+    historyLoadingState.style.display = "block";
+    historyContainer.innerHTML = "";
+    emptyHistoryState.style.display = "none";
+
+    const result = await getAllSessions();
+
+    historyLoadingState.style.display = "none";
+
+    if (!result.success || !result.sessions || result.sessions.length === 0) {
+      emptyHistoryState.style.display = "block";
+      return;
+    }
+
+    // Display sessions
+    historyContainer.innerHTML = "";
+
+    for (const sessionId of result.sessions) {
+      try {
+        const stats = await getSessionStats(sessionId);
+        const historyItem = createHistoryItem(sessionId, stats);
+        historyContainer.appendChild(historyItem);
+      } catch (error) {
+        console.error(`Failed to load stats for session ${sessionId}:`, error);
+      }
+    }
+
+    // Re-initialize Lucide icons
+    lucide.createIcons();
+
+  } catch (error) {
+    historyLoadingState.style.display = "none";
+    console.error("Failed to load history:", error);
+    historyContainer.innerHTML = `
+      <div style="text-align: center; padding: 40px; color: var(--error);">
+        <p>Failed to load history: ${error.message}</p>
+      </div>
+    `;
+  }
+}
+
+// New: Create history item element
+function createHistoryItem(sessionId, stats) {
+  const item = document.createElement("div");
+  item.className = "history-item";
+  item.style.cssText = `
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 15px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    transition: transform 0.2s, box-shadow 0.2s;
+  `;
+
+  const createdDate = stats.created_at ? new Date(stats.created_at).toLocaleString() : "Unknown";
+
+  item.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: start; gap: 20px;">
+      <div style="flex: 1;">
+        <h3 style="color: var(--text-primary); margin-bottom: 8px; font-size: 1.1rem;">
+          <i data-lucide="file-text" style="width: 20px; height: 20px; margin-right: 8px;"></i>
+          Session ${sessionId.substring(0, 8)}...
+        </h3>
+        <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 12px;">
+          <i data-lucide="clock" style="width: 14px; height: 14px; margin-right: 4px;"></i>
+          ${createdDate}
+        </p>
+        <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+          <span style="color: var(--text-tertiary); font-size: 0.8rem;">
+            <i data-lucide="file" style="width: 14px; height: 14px;"></i>
+            ${stats.document_count || 0} documents
+          </span>
+        </div>
+      </div>
+      <div style="display: flex; gap: 10px; flex-direction: column;">
+        <button class="btn btn-primary btn-sm load-session-btn" data-session-id="${sessionId}">
+          <i data-lucide="folder-open" style="width: 16px; height: 16px;"></i>
+          Load Session
+        </button>
+        <button class="btn btn-ghost btn-sm delete-session-btn" data-session-id="${sessionId}" style="color: var(--error);">
+          <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+          Delete
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Add event listeners
+  const loadBtn = item.querySelector(".load-session-btn");
+  const deleteBtn = item.querySelector(".delete-session-btn");
+
+  loadBtn.addEventListener("click", () => loadSession(sessionId));
+  deleteBtn.addEventListener("click", async () => {
+    if (confirm("Are you sure you want to delete this session?")) {
+      try {
+        await deleteSession(sessionId);
+        item.remove();
+        showNotification("Session deleted successfully", "success");
+
+        // Check if no more items
+        if (historyContainer.children.length === 0) {
+          document.getElementById("emptyHistoryState").style.display = "block";
+        }
+      } catch (error) {
+        showNotification("Failed to delete session: " + error.message, "error");
+      }
+    }
+  });
+
+  return item;
+}
+
+// New: Load a specific session
+async function loadSession(sessionId) {
+  try {
+    pdfSessionId = sessionId;
+    showResultsPage(true);
+
+    // Query the session to get existing charts
+    const result = await queryPdf("Show me all charts and images", sessionId);
+
+    if (result.success && result.existing_charts) {
+      displayExtractedCharts(result.existing_charts);
+    }
+
+    showNotification("Session loaded successfully", "success");
+  } catch (error) {
+    console.error("Failed to load session:", error);
+    showNotification("Failed to load session: " + error.message, "error");
+  }
+}
+
 async function downloadAllCharts() {
   try {
     showNotification("Preparing to download all charts...", "info");
@@ -1227,7 +1560,21 @@ async function downloadAllCharts() {
 }
 
 // Initialize Event Listeners
+// Initialize Event Listeners
 function initializeEventListeners() {
+  // Debug: Check if elements exist
+  console.log("PDF Input element:", pdfInput);
+  console.log("PDF Upload Area:", pdfUploadArea);
+  console.log("Analyze PDF Button:", analyzePdfBtn);
+  
+  // Safety check - if elements don't exist, log error
+  if (!pdfInput || !pdfUploadArea) {
+    console.error("PDF upload elements not found! Check HTML IDs.");
+    console.log("Available elements with 'pdf':", 
+      Array.from(document.querySelectorAll('[id*="pdf"]')).map(el => el.id)
+    );
+  }
+
   // Chart mode selection
   chartModeButtons.forEach((btn) => {
     btn.addEventListener("click", handleChartModeSelection);
@@ -1256,25 +1603,67 @@ function initializeEventListeners() {
   backToHomeBtn.addEventListener("click", backToHome);
   downloadAllChartsBtn.addEventListener("click", downloadAllCharts);
 
-  // New: PDF upload listeners
-  pdfInput.addEventListener("change", handlePdfUpload);
-  pdfUploadArea.addEventListener("click", () => pdfInput.click());
-  pdfUploadArea.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    pdfUploadArea.classList.add("drag-active");
-  });
-  pdfUploadArea.addEventListener("dragleave", () =>
-    pdfUploadArea.classList.remove("drag-active")
-  );
-  pdfUploadArea.addEventListener("drop", handlePdfDrop);
-  removePdfBtn.addEventListener("click", removePdf);
-  analyzePdfBtn.addEventListener("click", analyzePdf);
+  // History page
+  const historyBtn = document.getElementById("historyBtn");
+  const backToHomeFromHistoryBtn = document.getElementById("backToHomeFromHistoryBtn");
 
-  // New: PDF query listener
-  submitPdfQueryBtn.addEventListener("click", submitPdfQuery);
-  pdfQueryInput.addEventListener("keypress", (e) => {
-    if (e.key === "Enter") submitPdfQuery();
-  });
+  if (historyBtn) {
+    historyBtn.addEventListener("click", showHistoryPage);
+  }
+
+  if (backToHomeFromHistoryBtn) {
+    backToHomeFromHistoryBtn.addEventListener("click", backToHome);
+  }
+
+  // PDF upload listeners - with null checks
+  if (pdfInput && pdfUploadArea && analyzePdfBtn && removePdfBtn) {
+    pdfInput.addEventListener("change", handlePdfUpload);
+
+    pdfUploadArea.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log("PDF upload area clicked");
+      pdfInput.click();
+    });
+
+    pdfUploadArea.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      pdfUploadArea.classList.add("drag-active");
+    });
+
+    pdfUploadArea.addEventListener("dragleave", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      pdfUploadArea.classList.remove("drag-active");
+    });
+
+    pdfUploadArea.addEventListener("drop", handlePdfDrop);
+    removePdfBtn.addEventListener("click", removePdf);
+    analyzePdfBtn.addEventListener("click", analyzePdf);
+  } else {
+    console.error("PDF upload elements missing!");
+  }
+
+  // PDF query listeners - with null checks
+  if (submitPdfQueryBtn && pdfQueryInput) {
+    submitPdfQueryBtn.addEventListener("click", submitPdfQuery);
+    pdfQueryInput.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") submitPdfQuery();
+    });
+  }
+
+  // Session management buttons - with null checks
+  const reuseSessionBtn = document.getElementById("reuseSessionBtn");
+  const clearSessionBtn = document.getElementById("clearSessionBtn");
+  
+  if (reuseSessionBtn) {
+    reuseSessionBtn.addEventListener("click", queryWithSessionId);
+  }
+  
+  if (clearSessionBtn) {
+    clearSessionBtn.addEventListener("click", clearSession);
+  }
 
   // Initialize button states
   handleTextInput();
@@ -1291,7 +1680,7 @@ function clearSession() {
     alert("No session ID available to clear");
     return;
   }
-  fetch(`/api/clear-session/${pdfSessionId}`, { method: "DELETE" })
+  fetch(`/api/rag/clear-session/${pdfSessionId}`, { method: "DELETE" })
     .then((response) => response.json())
     .then((result) => {
       if (result.success) {
